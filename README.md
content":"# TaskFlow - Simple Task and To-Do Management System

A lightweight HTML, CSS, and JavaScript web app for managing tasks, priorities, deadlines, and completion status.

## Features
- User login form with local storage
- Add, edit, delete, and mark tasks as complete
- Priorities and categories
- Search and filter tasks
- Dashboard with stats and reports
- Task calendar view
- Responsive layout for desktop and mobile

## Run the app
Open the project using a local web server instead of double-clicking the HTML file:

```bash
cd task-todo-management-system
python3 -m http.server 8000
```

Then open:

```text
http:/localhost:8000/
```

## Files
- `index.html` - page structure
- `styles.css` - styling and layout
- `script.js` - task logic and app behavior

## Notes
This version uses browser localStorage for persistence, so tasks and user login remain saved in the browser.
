@@ -1,0 +1,480 @@
+const STORAGE_KEY = 'taskflow_tasks';
+const USER_KEY = 'taskflow_user';
+
+function generateId() {
+  if (window.crypto && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'task-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+}
+
+function getDefaultTasks() {
+  return [
+    {
+      id: generateId(),
+      title: 'Complete project proposal',
+      description: 'Draft the final IT capstone proposal and prepare submission notes.',
+      priority: 'high',
+      category: 'Work',
+      dueDate: getRelativeDate(1),
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: generateId(),
+      title: 'Review weekly study notes',
+      description: 'Summarize the recent lessons and identify weak areas for revision.',
+      priority: 'medium',
+      category: 'Study',
+      dueDate: getRelativeDate(2),
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: generateId(),
+      title: '30-minute workout',
+      description: 'Complete a short, consistent exercise routine to stay active.',
+      priority: 'low',
+      category: 'Health',
+      dueDate: getRelativeDate(0),
+      status: 'completed',
+      createdAt: new Date().toISOString()
+    }
+  ];
+}
+
+let tasks = JSON.parse(localStorage.getItem(STORAGE_KEY)) || getDefaultTasks();
+let selectedTaskId = null;
+
+const appState = {
+  currentSection: 'dashboard'
+};
+
+const elements = {
+  navItems: document.querySelectorAll('.nav-item'),
+  sections: document.querySelectorAll('.content-section'),
+  pageTitle: document.getElementById('pageTitle'),
+  taskList: document.getElementById('taskList'),
+  todayTasksList: document.getElementById('todayTasksList'),
+  totalTasksCount: document.getElementById('totalTasksCount'),
+  pendingTasksCount: document.getElementById('pendingTasksCount'),
+  completedTasksCount: document.getElementById('completedTasksCount'),
+  overdueTasksCount: document.getElementById('overdueTasksCount'),
+  taskCountBadge: document.getElementById('taskCountBadge'),
+  searchInput: document.getElementById('searchInput'),
+  filterPriority: document.getElementById('filterPriority'),
+  filterStatus: document.getElementById('filterStatus'),
+  addTaskBtn: document.getElementById('addTaskBtn'),
+  taskModal: document.getElementById('taskModal'),
+  taskForm: document.getElementById('taskForm'),
+  taskModalTitle: document.getElementById('taskModalTitle'),
+  closeTaskModal: document.getElementById('closeTaskModal'),
+  cancelTaskBtn: document.getElementById('cancelTaskBtn'),
+  authModal: document.getElementById('authModal'),
+  authForm: document.getElementById('authForm'),
+  userAvatar: document.getElementById('userAvatar'),
+  displayUserName: document.getElementById('displayUserName'),
+  logoutBtn: document.getElementById('logoutBtn'),
+  progressRing: document.getElementById('progressRing'),
+  completionPercent: document.getElementById('completionPercent'),
+  completionRateReport: document.getElementById('completionRateReport'),
+  completedProgressText: document.getElementById('completedProgressText'),
+  pendingProgressText: document.getElementById('pendingProgressText'),
+  upcomingDeadlines: document.getElementById('upcomingDeadlines'),
+  tasksThisWeek: document.getElementById('tasksThisWeek'),
+  calendarContainer: document.getElementById('calendarContainer')
+};
+
+function getRelativeDate(offset) {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return date.toISOString().split('T')[0];
+}
+
+function getUser() {
+  try {
+    return JSON.parse(localStorage.getItem(USER_KEY)) || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function setUser(user) {
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+function saveTasks() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+}
+
+function formatDate(dateString) {
+  if (!dateString) return 'No deadline';
+  const date = new Date(dateString);
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function isOverdue(task) {
+  if (task.status === 'completed' || !task.dueDate) return false;
+  const due = new Date(task.dueDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return due < today;
+}
+
+function getFilteredTasks() {
+  const searchText = (elements.searchInput?.value || '').trim().toLowerCase();
+  const priorityFilter = elements.filterPriority?.value || 'all';
+  const statusFilter = elements.filterStatus?.value || 'all';
+
+  return tasks.filter((task) => {
+    const descriptionText = (task.description || '').toLowerCase();
+    const titleText = (task.title || '').toLowerCase();
+    const matchesSearch = !searchText || titleText.includes(searchText) || descriptionText.includes(searchText);
+    const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
+    const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
+    return matchesSearch && matchesPriority && matchesStatus;
+  });
+}
+
+function renderTaskList() {
+  const filteredTasks = getFilteredTasks();
+
+  if (!filteredTasks.length) {
+    elements.taskList.innerHTML = '<li class="empty-state">No tasks match your current filters.</li>';
+    elements.taskCountBadge.textContent = '0 tasks';
+    return;
+  }
+
+  elements.taskCountBadge.textContent = `${filteredTasks.length} task${filteredTasks.length > 1 ? 's' : ''}`;
+
+  elements.taskList.innerHTML = filteredTasks
+    .map(
+      (task) => `
+        <li class="task-item ${task.status === 'completed' ? 'completed' : ''}">
+          <div class="task-main">
+            <button type="button" class="task-check" data-action="toggle-status" data-id="${task.id}" aria-label="Toggle status"></button>
+            <div>
+              <h4 class="task-title">${task.title}</h4>
+              <p class="task-meta">
+                <span class="category-tag">${task.category}</span>
+                <span class="priority-tag ${task.priority}">${task.priority}</span>
+                <span class="status-tag ${task.status}">${task.status}</span>
+                <span>📅 ${formatDate(task.dueDate)}</span>
+              </p>
+              ${task.description ? `<p class="task-meta">${task.description}</p>` : ''}
+            </div>
+          </div>
+          <div class="task-actions">
+            <button type="button" class="icon-btn" data-action="edit" data-id="${task.id}" aria-label="Edit task">✏️</button>
+            <button type="button" class="icon-btn delete" data-action="delete" data-id="${task.id}" aria-label="Delete task">🗑️</button>
+          </div>
+        </li>
+      `
+    )
+    .join('');
+}
+
+function renderTodayTasks() {
+  const today = new Date().toISOString().split('T')[0];
+  const tasksForToday = tasks.filter((task) => task.dueDate === today && task.status !== 'completed');
+
+  if (!tasksForToday.length) {
+    elements.todayTasksList.innerHTML = '<li class="empty-state">No tasks due today.</li>';
+    return;
+  }
+
+  elements.todayTasksList.innerHTML = tasksForToday
+    .slice(0, 4)
+    .map(
+      (task) => `
+        <li class="task-item ${task.status === 'completed' ? 'completed' : ''}">
+          <div class="task-main">
+            <button type="button" class="task-check" data-action="toggle-status" data-id="${task.id}" aria-label="Toggle status"></button>
+            <div>
+              <h4 class="task-title">${task.title}</h4>
+              <p class="task-meta">
+                <span class="priority-tag ${task.priority}">${task.priority}</span>
+                <span class="category-tag">${task.category}</span>
+              </p>
+            </div>
+          </div>
+        </li>
+      `
+    )
+    .join('');
+}
+
+function updateDashboardStats() {
+  const total = tasks.length;
+  const completed = tasks.filter((task) => task.status === 'completed').length;
+  const pending = total - completed;
+  const overdue = tasks.filter((task) => isOverdue(task)).length;
+
+  elements.totalTasksCount.textContent = String(total);
+  elements.pendingTasksCount.textContent = String(pending);
+  elements.completedTasksCount.textContent = String(completed);
+  elements.overdueTasksCount.textContent = String(overdue);
+
+  const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
+  const circumference = 2 * Math.PI * 46;
+  elements.progressRing.style.strokeDasharray = String(circumference);
+  elements.progressRing.style.strokeDashoffset = String(circumference - (percent / 100) * circumference);
+  elements.completionPercent.textContent = `${percent}%`;
+  elements.completedProgressText.textContent = String(completed);
+  elements.pendingProgressText.textContent = String(pending);
+
+  const upcoming = tasks.filter((task) => task.status !== 'completed' && task.dueDate).length;
+  const thisWeek = tasks.filter((task) => {
+    if (!task.dueDate) return false;
+    const due = new Date(task.dueDate);
+    const now = new Date();
+    const diffTime = due.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 && diffDays <= 7;
+  }).length;
+
+  elements.upcomingDeadlines.textContent = String(upcoming);
+  elements.tasksThisWeek.textContent = String(thisWeek);
+  elements.completionRateReport.textContent = `${percent}%`;
+}
+
+function renderCalendar() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startDay = firstDay.getDay();
+  const totalDays = lastDay.getDate();
+  const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  const cells = [];
+  weekDays.forEach(day => {
+    cells.push(`<div class="calendar-head">${day}</div>`);
+  });
+
+  for (let i = 0; i < startDay; i++) {
+    cells.push('<div class="calendar-day empty"></div>');
+  }
+
+  for (let day = 1; day <= totalDays; day++) {
+    const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const tasksOnDate = tasks.filter((task) => task.dueDate === dateString);
+    const taskPills = tasksOnDate
+      .slice(0, 2)
+      .map((task) => `<div class="calendar-task-pill">${task.title}</div>`)
+      .join('');
+
+    cells.push(`
+      <div class="calendar-day">
+        <div class="date-number">${day}</div>
+        <div>${taskPills}</div>
+      </div>
+    `);
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push('<div class="calendar-day empty"></div>');
+  }
+
+  elements.calendarContainer.innerHTML = cells.join('');
+}
+
+function renderApp() {
+  renderTaskList();
+  renderTodayTasks();
+  updateDashboardStats();
+  renderCalendar();
+}
+
+function openTaskModal(task = null) {
+  selectedTaskId = task ? task.id : null;
+  elements.taskModalTitle.textContent = task ? 'Edit Task' : 'Add New Task';
+  elements.taskForm.reset();
+
+  if (task) {
+    document.getElementById('taskTitle').value = task.title;
+    document.getElementById('taskDescription').value = task.description || '';
+    document.getElementById('taskPriority').value = task.priority;
+    document.getElementById('taskCategory').value = task.category;
+    document.getElementById('taskDueDate').value = task.dueDate || '';
+    document.getElementById('taskStatus').value = task.status;
+  } else {
+    document.getElementById('taskPriority').value = 'medium';
+    document.getElementById('taskCategory').value = 'Work';
+    document.getElementById('taskStatus').value = 'pending';
+  }
+
+  elements.taskModal.classList.remove('hidden');
+}
+
+function closeTaskModal() {
+  elements.taskModal.classList.add('hidden');
+  elements.taskForm.reset();
+  selectedTaskId = null;
+}
+
+function handleTaskSubmit(event) {
+  event.preventDefault();
+
+  const title = document.getElementById('taskTitle').value.trim();
+  const description = document.getElementById('taskDescription').value.trim();
+  const priority = document.getElementById('taskPriority').value;
+  const category = document.getElementById('taskCategory').value;
+  const dueDate = document.getElementById('taskDueDate').value;
+  const status = document.getElementById('taskStatus').value;
+
+  if (!title) {
+    alert('Please enter a task title.');
+    return;
+  }
+
+  if (selectedTaskId) {
+    tasks = tasks.map((task) =>
+      task.id === selectedTaskId
+        ? { ...task, title, description, priority, category, dueDate, status }
+        : task
+    );
+  } else {
+    tasks.unshift({
+      id: generateId(),
+      title,
+      description,
+      priority,
+      category,
+      dueDate,
+      status,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  saveTasks();
+  renderApp();
+  closeTaskModal();
+}
+
+function toggleTaskStatus(taskId) {
+  tasks = tasks.map((task) => {
+    if (task.id !== taskId) return task;
+    return {
+      ...task,
+      status: task.status === 'completed' ? 'pending' : 'completed'
+    };
+  });
+
+  saveTasks();
+  renderApp();
+}
+
+function deleteTask(taskId) {
+  const task = tasks.find((item) => item.id === taskId);
+  if (!task) return;
+
+  const confirmed = window.confirm(`Delete task: "${task.title}"?`);
+  if (!confirmed) return;
+
+  tasks = tasks.filter((item) => item.id !== taskId);
+  saveTasks();
+  renderApp();
+}
+
+function handleTaskActions(event) {
+  const target = event.target.closest('[data-action]');
+  if (!target) return;
+
+  const { action, id } = target.dataset;
+  const task = tasks.find((item) => item.id === id);
+
+  if (!task) return;
+
+  if (action === 'toggle-status') toggleTaskStatus(id);
+  if (action === 'delete') deleteTask(id);
+  if (action === 'edit') openTaskModal(task);
+}
+
+function setActiveSection(section) {
+  appState.currentSection = section;
+
+  elements.navItems.forEach((item) => {
+    item.classList.toggle('active', item.dataset.section === section);
+  });
+
+  elements.sections.forEach((element) => {
+    element.classList.toggle('active-section', element.id === section);
+  });
+
+  const sectionTitles = {
+    dashboard: 'Dashboard',
+    tasks: 'Tasks',
+    calendar: 'Calendar',
+    reports: 'Reports',
+    admin: 'Admin Panel'
+  };
+
+  elements.pageTitle.textContent = sectionTitles[section] || 'Dashboard';
+}
+
+function initializeUser() {
+  const user = getUser();
+  if (!user) {
+    elements.authModal.classList.remove('hidden');
+    return;
+  }
+
+  elements.authModal.classList.add('hidden');
+  elements.displayUserName.textContent = user.name;
+  elements.userAvatar.textContent = user.name.charAt(0).toUpperCase();
+}
+
+function handleAuthSubmit(event) {
+  event.preventDefault();
+
+  const name = document.getElementById('fullName').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value.trim();
+
+  if (!name || !email || !password) {
+    alert('Please fill in all fields.');
+    return;
+  }
+
+  const user = { name, email };
+  setUser(user);
+  initializeUser();
+}
+
+function logout() {
+  localStorage.removeItem(USER_KEY);
+  initializeUser();
+  elements.authModal.classList.remove('hidden');
+  elements.authForm.reset();
+}
+
+function bindEvents() {
+  elements.navItems.forEach((button) => {
+    button.addEventListener('click', () => setActiveSection(button.dataset.section));
+  });
+
+  elements.searchInput.addEventListener('input', renderTaskList);
+  elements.filterPriority.addEventListener('change', renderTaskList);
+  elements.filterStatus.addEventListener('change', renderTaskList);
+
+  elements.addTaskBtn.addEventListener('click', () => openTaskModal());
+  elements.closeTaskModal.addEventListener('click', closeTaskModal);
+  elements.cancelTaskBtn.addEventListener('click', closeTaskModal);
+  elements.taskForm.addEventListener('submit', handleTaskSubmit);
+  elements.taskList.addEventListener('click', handleTaskActions);
+  elements.todayTasksList.addEventListener('click', handleTaskActions);
+
+  elements.authForm.addEventListener('submit', handleAuthSubmit);
+  elements.logoutBtn.addEventListener('click', logout);
+}
+
+function init() {
+  bindEvents();
+  initializeUser();
+  renderApp();
+  setActiveSection('dashboard');
+}
+
+init();
